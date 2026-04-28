@@ -25,6 +25,8 @@ import ContainerNode from '@/components/nodes/ContainerNode';
 import ComponentNode from '@/components/nodes/ComponentNode';
 import CodeNode from '@/components/nodes/CodeNode';
 import BoundaryGroupNode from '@/components/nodes/BoundaryGroupNode';
+import TextNode from '@/components/nodes/TextNode';
+import LabeledGroupNode from '@/components/nodes/LabeledGroupNode';
 import type { NodeTypes } from 'reactflow';
 import Toolbar from '@/components/Toolbar';
 import {
@@ -39,6 +41,7 @@ import type { CreateElementFormData } from '@/components/CreateElementForm';
 import EditElementForm from '@/components/EditElementForm';
 import EdgeContextMenu from '@/components/EdgeContextMenu';
 import NodeContextMenu from '@/components/NodeContextMenu';
+import TextContextMenu, { type TextFont } from '@/components/TextContextMenu';
 import { generateId } from '@/lib/serializer';
 import { elementsToNodes, elementsToEdges } from '@/lib/transform';
 import { computeLayout } from '@/lib/layout-engine';
@@ -70,6 +73,8 @@ const nodeTypes: NodeTypes = {
   component: ComponentNode,
   code: CodeNode,
   boundary: BoundaryGroupNode,
+  text: TextNode,
+  group: LabeledGroupNode,
 };
 
 const defaultEdgeOptions = { type: 'smoothstep' as const };
@@ -96,7 +101,20 @@ function CanvasContent() {
     x: number;
     y: number;
     nodeId: string;
+    nodeType?: string;
     currentColor?: string;
+    currentFont?: TextFont;
+  } | null>(null);
+  const [textMenu, setTextMenu] = useState<{
+    x: number;
+    y: number;
+    nodeId: string;
+    currentFont: TextFont;
+  } | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<{
+    x: number;
+    y: number;
+    nodeIds: string[];
   } | null>(null);
 
   const setNodes = useDiagramStore((s) => s.setNodes);
@@ -120,6 +138,31 @@ function CanvasContent() {
         onEdit: (nodeId: string) => {
           setEditingElementId(nodeId);
         },
+        ...(node.type === 'text' ? {
+          onTextChange: (nodeId: string, text: string) => {
+            useDiagramStore.getState().updateElement(nodeId, { name: text });
+            const store = useDiagramStore.getState();
+            store.setNodes(
+              store.nodes.map((n) =>
+                n.id === nodeId ? { ...n, data: { ...n.data, name: text, autoFocus: false } } : n
+              )
+            );
+          },
+          onTextContextMenu: (e: React.MouseEvent, nodeId: string, currentFont: TextFont) => {
+            setTextMenu({ x: e.clientX, y: e.clientY, nodeId, currentFont });
+          },
+        } : {}),
+        ...(node.type === 'group' ? {
+          onLabelChange: (nodeId: string, label: string) => {
+            useDiagramStore.getState().updateElement(nodeId, { name: label });
+            const store = useDiagramStore.getState();
+            store.setNodes(
+              store.nodes.map((n) =>
+                n.id === nodeId ? { ...n, data: { ...n.data, label } } : n
+              )
+            );
+          },
+        } : {}),
       },
     }));
   }, [nodes]);
@@ -204,13 +247,15 @@ function CanvasContent() {
   );
 
   const handleNodeContextMenu = useCallback(
-    (event: React.MouseEvent, node: { id: string; data: Record<string, unknown> }) => {
+    (event: React.MouseEvent, node: { id: string; type?: string; data: Record<string, unknown> }) => {
       event.preventDefault();
       setNodeMenu({
         x: event.clientX,
         y: event.clientY,
         nodeId: node.id,
+        nodeType: node.type,
         currentColor: node.data.customColor as string | undefined,
+        currentFont: node.data.font as TextFont | undefined,
       });
     },
     []
@@ -219,7 +264,6 @@ function CanvasContent() {
   const handleChangeNodeColor = useCallback(
     (nodeId: string, color: string | undefined) => {
       const store = useDiagramStore.getState();
-      // Update the node's data.customColor
       const updatedNodes = store.nodes.map((n) =>
         n.id === nodeId
           ? { ...n, data: { ...n.data, customColor: color } }
@@ -229,6 +273,120 @@ function CanvasContent() {
     },
     []
   );
+
+  const handleChangeTextFont = useCallback(
+    (nodeId: string, font: TextFont) => {
+      const store = useDiagramStore.getState();
+      store.setNodes(
+        store.nodes.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, font } } : n
+        )
+      );
+    },
+    []
+  );
+
+  const handleSelectionContextMenu = useCallback(
+    (event: React.MouseEvent, selectedNodes: { id: string }[]) => {
+      event.preventDefault();
+      const ids = selectedNodes.map((n) => n.id);
+      if (ids.length < 2) return;
+      setSelectionMenu({ x: event.clientX, y: event.clientY, nodeIds: ids });
+    },
+    []
+  );
+
+  const handleGroupSelected = useCallback((nodeIds: string[]) => {
+    const store = useDiagramStore.getState();
+    const PADDING = 40;
+
+    const targets = store.nodes.filter((n) => nodeIds.includes(n.id));
+    if (targets.length === 0) return;
+
+    // Compute bounding box of selected nodes
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of targets) {
+      const w = (n.style?.width as number | undefined) ?? 250;
+      const h = (n.style?.height as number | undefined) ?? 150;
+      minX = Math.min(minX, n.position.x);
+      minY = Math.min(minY, n.position.y);
+      maxX = Math.max(maxX, n.position.x + w);
+      maxY = Math.max(maxY, n.position.y + h);
+    }
+
+    const groupId = generateId();
+    const groupX = minX - PADDING;
+    const groupY = minY - PADDING;
+    const groupW = maxX - minX + PADDING * 2;
+    const groupH = maxY - minY + PADDING * 2;
+
+    // Group node — rendered behind children
+    const groupNode: ReactFlowNode = {
+      id: groupId,
+      type: 'group',
+      position: { x: groupX, y: groupY },
+      style: { width: groupW, height: groupH },
+      data: {
+        label: 'Group',
+        onLabelChange: () => {},
+        onEdit: () => {},
+        onDrillDown: () => {},
+      },
+    };
+
+    // Re-position children relative to the group
+    const updatedNodes = store.nodes.map((n) => {
+      if (!nodeIds.includes(n.id)) return n;
+      return {
+        ...n,
+        parentId: groupId,
+        extent: 'parent' as const,
+        position: {
+          x: n.position.x - groupX,
+          y: n.position.y - groupY,
+        },
+      };
+    });
+
+    // Group node must come before its children in the array
+    store.setNodes([groupNode, ...updatedNodes]);
+
+    // Persist as an element so it saves/restores
+    store.addElement({
+      id: groupId,
+      type: 'group',
+      name: 'Group',
+      description: '',
+      relationships: [],
+    });
+
+    setSelectionMenu(null);
+  }, []);
+
+  const handleUngroup = useCallback((groupId: string) => {
+    const store = useDiagramStore.getState();
+    const groupNode = store.nodes.find((n) => n.id === groupId);
+    if (!groupNode) return;
+
+    // Convert children back to absolute positions and remove parentId/extent
+    const updatedNodes = store.nodes
+      .filter((n) => n.id !== groupId)
+      .map((n) => {
+        if (n.parentId !== groupId) return n;
+        return {
+          ...n,
+          parentId: undefined,
+          extent: undefined,
+          position: {
+            x: n.position.x + groupNode.position.x,
+            y: n.position.y + groupNode.position.y,
+          },
+        };
+      });
+
+    store.setNodes(updatedNodes);
+    store.removeElement(groupId);
+  }, []);
 
   const handleConnect = useCallback(
     (connection: Connection) => {
@@ -366,7 +524,9 @@ function CanvasContent() {
       elements: ArchitectureElement[],
       savedPositions: Record<string, { x: number; y: number; width?: number; height?: number }> = {},
       savedEdgeStyles: Record<string, { type?: string; sourceHandle?: string; targetHandle?: string }> = {},
-      savedNodeColors: Record<string, string> = {}
+      savedNodeColors: Record<string, string> = {},
+      savedTextFonts: Record<string, string> = {},
+      savedNodeParents: Record<string, { parentId: string; extent?: 'parent' }> = {}
     ) => {
       const store = useDiagramStore.getState();
 
@@ -385,6 +545,13 @@ function CanvasContent() {
           : null;
 
       let filteredElements = elements.filter((el) => {
+        // Text and group nodes are canvas annotations — always visible at the current level/parent
+        if (el.type === 'text' || el.type === 'group') {
+          if (currentParent !== null) {
+            return el.parentId === currentParent;
+          }
+          return !el.parentId;
+        }
         if (el.type !== activeType) return false;
         if (currentParent !== null) {
           return el.parentId === currentParent;
@@ -393,7 +560,7 @@ function CanvasContent() {
       });
 
       // Fallback: show all top-level elements if none match the active level
-      if (filteredElements.length === 0 && currentParent === null) {
+      if (filteredElements.filter((el) => el.type !== 'text' && el.type !== 'group').length === 0 && currentParent === null) {
         filteredElements = elements.filter((el) => !el.parentId);
       }
 
@@ -438,14 +605,19 @@ function CanvasContent() {
         const saved = savedPositions[node.id];
         const layoutPos = layoutPositionMap.get(node.id);
         const savedColor = savedNodeColors[node.id];
+        const savedFont = savedTextFonts[node.id];
+        const savedParent = savedNodeParents[node.id];
         return {
           ...node,
           position: saved
             ? { x: saved.x, y: saved.y }
             : layoutPos ?? node.position,
+          ...(savedParent ? { parentId: savedParent.parentId, extent: savedParent.extent } : {}),
           data: {
             ...node.data,
+            ...(node.type === 'group' ? { label: node.data.name } : {}),
             ...(savedColor ? { customColor: savedColor } : {}),
+            ...(savedFont ? { font: savedFont } : {}),
           },
           ...(saved?.width || saved?.height
             ? {
@@ -459,7 +631,14 @@ function CanvasContent() {
         };
       });
 
-      store.setNodes(positionedNodes);
+      // Group nodes must come before their children in the array (ReactFlow requirement)
+      const sortedNodes = [...positionedNodes].sort((a, b) => {
+        if (a.type === 'group' && b.type !== 'group') return -1;
+        if (a.type !== 'group' && b.type === 'group') return 1;
+        return 0;
+      });
+
+      store.setNodes(sortedNodes);
 
       // Apply saved edge styles (type, handles)
       const styledEdges = rfEdges.map((edge) => {
@@ -496,7 +675,7 @@ function CanvasContent() {
       });
 
       // Pass saved positions so nodes keep their positions from the file
-      await renderElements(workspace.elements, workspace.positions ?? {}, workspace.edgeStyles ?? {}, workspace.nodeColors ?? {});
+      await renderElements(workspace.elements, workspace.positions ?? {}, workspace.edgeStyles ?? {}, workspace.nodeColors ?? {}, workspace.textFonts ?? {}, workspace.nodeParents ?? {});
 
       store.setViewport(workspace.viewport);
     },
@@ -545,6 +724,31 @@ function CanvasContent() {
     return nodeColors;
   }, []);
 
+  const captureTextFonts = useCallback(() => {
+    const store = useDiagramStore.getState();
+    const textFonts: Record<string, string> = {};
+    for (const node of store.nodes) {
+      const font = node.data.font as string | undefined;
+      if (font) textFonts[node.id] = font;
+    }
+    return textFonts;
+  }, []);
+
+  /** Captures parentId/extent for grouped nodes. */
+  const captureNodeParents = useCallback(() => {
+    const store = useDiagramStore.getState();
+    const nodeParents: Record<string, { parentId: string; extent?: 'parent' }> = {};
+    for (const node of store.nodes) {
+      if (node.parentId) {
+        nodeParents[node.id] = {
+          parentId: node.parentId,
+          ...(node.extent === 'parent' ? { extent: 'parent' as const } : {}),
+        };
+      }
+    }
+    return nodeParents;
+  }, []);
+
   /**
    * Builds the current WorkspaceFile from store state for saving.
    * Captures current node positions so they persist across save/open.
@@ -554,6 +758,8 @@ function CanvasContent() {
     const positions = capturePositions();
     const edgeStyles = captureEdgeStyles();
     const nodeColors = captureNodeColors();
+    const textFonts = captureTextFonts();
+    const nodeParents = captureNodeParents();
 
     return {
       version: 1,
@@ -562,11 +768,13 @@ function CanvasContent() {
       positions,
       edgeStyles,
       nodeColors,
+      textFonts,
+      nodeParents,
       viewport: store.viewport,
       activeLevel: store.activeLevel,
       navigationStack: store.navigationStack,
     };
-  }, [capturePositions, captureEdgeStyles, captureNodeColors]);
+  }, [capturePositions, captureEdgeStyles, captureNodeColors, captureTextFonts, captureNodeParents]);
 
   /**
    * Auto-saves the current workspace state to IndexedDB.
@@ -611,6 +819,22 @@ function CanvasContent() {
           if (color) nodeColors[node.id] = color;
         }
 
+        const textFonts: Record<string, string> = {};
+        for (const node of store.nodes) {
+          const font = node.data.font as string | undefined;
+          if (font) textFonts[node.id] = font;
+        }
+
+        const nodeParents: Record<string, { parentId: string; extent?: 'parent' }> = {};
+        for (const node of store.nodes) {
+          if (node.parentId) {
+            nodeParents[node.id] = {
+              parentId: node.parentId,
+              ...(node.extent === 'parent' ? { extent: 'parent' as const } : {}),
+            };
+          }
+        }
+
         const workspace: WorkspaceFile = {
           version: 1,
           name: store.workspaceName ?? 'Untitled',
@@ -618,6 +842,8 @@ function CanvasContent() {
           positions,
           edgeStyles,
           nodeColors,
+          textFonts,
+          nodeParents,
           viewport: store.viewport,
           activeLevel: store.activeLevel,
           navigationStack: store.navigationStack,
@@ -757,12 +983,103 @@ function CanvasContent() {
       const currentNodeColors = captureNodeColors();
 
       // Re-render, preserving existing positions and edge styles
-      await renderElements(useDiagramStore.getState().allElements, currentPositions, currentEdgeStyles, currentNodeColors);
+      await renderElements(useDiagramStore.getState().allElements, currentPositions, currentEdgeStyles, currentNodeColors, captureTextFonts(), captureNodeParents());
 
       toast.success('Element created');
     },
     [currentParentId, renderElements]
   );
+
+  const handleAddTextNode = useCallback(() => {
+    const store = useDiagramStore.getState();
+    const id = generateId();
+
+    const element: ArchitectureElement = {
+      id,
+      type: 'text',
+      name: 'Text',
+      description: '',
+      ...(currentParentId ? { parentId: currentParentId } : {}),
+      relationships: [],
+    };
+
+    store.addElement(element);
+
+    // Place the new text node in the center of the current viewport
+    const vp = store.viewport;
+    const x = (-vp.x + window.innerWidth / 2) / vp.zoom - 80;
+    const y = (-vp.y + window.innerHeight / 2) / vp.zoom - 30;
+
+    const newNode: ReactFlowNode = {
+      id,
+      type: 'text',
+      position: { x, y },
+      data: {
+        name: 'Text',
+        autoFocus: true,
+        onTextChange: () => {},
+        onEdit: () => {},
+        onDrillDown: () => {},
+      },
+    };
+
+    store.setNodes([...store.nodes, newNode]);
+  }, [currentParentId]);
+
+  // Copy/paste clipboard ref — holds copied node+element pairs
+  const clipboardRef = useRef<Array<{ node: ReactFlowNode; element: ArchitectureElement }>>([]);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Ignore when typing in an input/textarea
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (e.key === 'c' && (e.ctrlKey || e.metaKey)) {
+        const store = useDiagramStore.getState();
+        const selectedNodes = store.nodes.filter((n) => (n as ReactFlowNode & { selected?: boolean }).selected);
+        if (selectedNodes.length === 0) return;
+
+        clipboardRef.current = selectedNodes.map((n) => ({
+          node: n,
+          element: store.allElements.find((el) => el.id === n.id)!,
+        })).filter((item) => item.element);
+      }
+
+      if (e.key === 'v' && (e.ctrlKey || e.metaKey)) {
+        if (clipboardRef.current.length === 0) return;
+        const store = useDiagramStore.getState();
+        const OFFSET = 24;
+
+        const newNodes: ReactFlowNode[] = [];
+        const newElements: ArchitectureElement[] = [];
+
+        for (const { node, element } of clipboardRef.current) {
+          const newId = generateId();
+          newElements.push({
+            ...element,
+            id: newId,
+            relationships: [],
+          });
+          newNodes.push({
+            ...node,
+            id: newId,
+            position: { x: node.position.x + OFFSET, y: node.position.y + OFFSET },
+            selected: true,
+            data: { ...node.data, autoFocus: false },
+          });
+        }
+
+        // Deselect old nodes, add new ones
+        const deselected = store.nodes.map((n) => ({ ...n, selected: false }));
+        store.setNodes([...deselected, ...newNodes]);
+        for (const el of newElements) store.addElement(el);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Detect API support after mount
   useEffect(() => {
@@ -803,7 +1120,7 @@ function CanvasContent() {
             viewport: cachedState.viewport ?? { x: 0, y: 0, zoom: 1 },
           });
 
-          await renderElements(cachedState.elements, cachedState.positions ?? {}, cachedState.edgeStyles ?? {}, cachedState.nodeColors ?? {});
+          await renderElements(cachedState.elements, cachedState.positions ?? {}, cachedState.edgeStyles ?? {}, cachedState.nodeColors ?? {}, cachedState.textFonts ?? {}, cachedState.nodeParents ?? {});
           store.setViewport(cachedState.viewport ?? { x: 0, y: 0, zoom: 1 });
 
           toast.success(`Restored "${cachedState.name}"`);
@@ -848,6 +1165,7 @@ function CanvasContent() {
           onSave={handleSave}
           onSaveAs={handleSaveAs}
           onCreateElement={handleCreateElement}
+          onAddText={handleAddTextNode}
           currentLevel={activeLevel}
           parentId={currentParentId}
           isSupported={isSupported}
@@ -908,9 +1226,10 @@ function CanvasContent() {
           onEdgeUpdateEnd={handleEdgeUpdateEnd}
           onEdgeContextMenu={handleEdgeContextMenu}
           onNodeContextMenu={handleNodeContextMenu}
+          onSelectionContextMenu={handleSelectionContextMenu}
           onMoveEnd={handleViewportChange}
           edgeUpdaterRadius={20}
-          onPaneClick={() => { setEdgeMenu(null); setNodeMenu(null); }}
+          onPaneClick={() => { setEdgeMenu(null); setNodeMenu(null); setTextMenu(null); setSelectionMenu(null); }}
           panOnDrag
           zoomOnScroll
           fitView
@@ -956,10 +1275,48 @@ function CanvasContent() {
           x={nodeMenu.x}
           y={nodeMenu.y}
           nodeId={nodeMenu.nodeId}
+          nodeType={nodeMenu.nodeType}
           currentColor={nodeMenu.currentColor}
+          currentFont={nodeMenu.currentFont}
           onChangeColor={handleChangeNodeColor}
+          onChangeFont={handleChangeTextFont}
+          onUngroup={handleUngroup}
           onClose={() => setNodeMenu(null)}
         />
+      )}
+
+      {textMenu && (
+        <TextContextMenu
+          x={textMenu.x}
+          y={textMenu.y}
+          nodeId={textMenu.nodeId}
+          currentFont={textMenu.currentFont}
+          onChangeFont={handleChangeTextFont}
+          onClose={() => setTextMenu(null)}
+        />
+      )}
+
+      {selectionMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setSelectionMenu(null)} />
+          <div
+            className="fixed z-50 min-w-[160px] rounded-md bg-white shadow-lg ring-1 ring-slate-200 py-1"
+            style={{ left: selectionMenu.x, top: selectionMenu.y }}
+          >
+            <button
+              type="button"
+              onClick={() => handleGroupSelected(selectionMenu.nodeIds)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <svg className="h-4 w-4 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="20" rx="3" />
+                <path d="M7 7h4v4H7z" /><path d="M13 13h4v4h-4z" />
+              </svg>
+              Group selection
+            </button>
+          </div>
+        </>
       )}
 
       {/* Edit element dialog */}

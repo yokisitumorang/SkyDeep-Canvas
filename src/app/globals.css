@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Virgil — handwritten font from Excalidraw */
+@font-face {
+  font-family: 'Virgil';
+  src: url('https://excalidraw.com/Virgil.woff2') format('woff2');
+  font-display: swap;
+}
+
 @theme inline {
   --color-background: #ffffff;
   --color-foreground: #171717;
@@ -11,6 +18,11 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* Virgil font scoped to canvas nodes only */
+.react-flow__node {
+  font-family: 'Virgil', system-ui, sans-serif;
 }
 
 /* React Flow overrides for cleaner look */

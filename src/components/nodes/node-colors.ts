@@ -75,3 +75,12 @@ export function getNodeColors(c4Type: string, customColor?: string): NodeColorCl
   const colorKey = customColor ?? TYPE_DEFAULTS[c4Type] ?? 'slate';
   return COLOR_MAP[colorKey] ?? COLOR_MAP.slate;
 }
+
+/** Returns the inline font-family style for a node based on its font setting. */
+export function getNodeFontStyle(font?: 'default' | 'virgil'): React.CSSProperties {
+  if (font === 'default') {
+    return { fontFamily: 'var(--font-geist-sans), system-ui, sans-serif' };
+  }
+  // 'virgil' is the default for canvas nodes (set via .react-flow__node CSS)
+  return {};
+}

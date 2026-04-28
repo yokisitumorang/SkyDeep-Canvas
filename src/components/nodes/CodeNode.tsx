@@ -4,13 +4,14 @@ import { memo } from 'react';
 import { Handle, Position, NodeResizer } from 'reactflow';
 import type { NodeProps } from 'reactflow';
 import type { C4NodeData } from '@/types/c4';
-import { getNodeColors } from './node-colors';
+import { getNodeColors, getNodeFontStyle } from './node-colors';
 
 function CodeNode({ id, data, selected }: NodeProps<C4NodeData>) {
   const c = getNodeColors('code', data.customColor);
 
   return (
     <div
+      style={getNodeFontStyle(data.font)}
       className={`min-w-[200px] h-full rounded-lg ${c.bg} p-4 shadow-sm font-mono transition-shadow ${
         selected ? `ring-2 ${c.ringSelected} shadow-md` : `ring-1 ring-inset ${c.ring}`
       } ${data.hasChildren ? 'cursor-pointer' : 'opacity-60'}`}

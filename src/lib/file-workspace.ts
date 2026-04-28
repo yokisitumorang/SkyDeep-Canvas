@@ -32,6 +32,10 @@ export interface WorkspaceFile {
   edgeStyles: Record<string, { type?: string; sourceHandle?: string; targetHandle?: string }>;
   /** Saved node colors keyed by node id */
   nodeColors: Record<string, string>;
+  /** Saved text node fonts keyed by node id */
+  textFonts: Record<string, string>;
+  /** Saved node parent relationships keyed by node id */
+  nodeParents: Record<string, { parentId: string; extent?: 'parent' }>;
   viewport: { x: number; y: number; zoom: number };
   activeLevel: C4Level;
   navigationStack: NavigationEntry[];
@@ -48,6 +52,8 @@ export function createEmptyWorkspace(name: string): WorkspaceFile {
     positions: {},
     edgeStyles: {},
     nodeColors: {},
+    textFonts: {},
+    nodeParents: {},
     viewport: { x: 0, y: 0, zoom: 1 },
     activeLevel: 'L1',
     navigationStack: [],
@@ -83,6 +89,8 @@ export function parseWorkspace(json: string): WorkspaceFile {
     positions: data.positions ?? {},
     edgeStyles: data.edgeStyles ?? {},
     nodeColors: data.nodeColors ?? {},
+    textFonts: data.textFonts ?? {},
+    nodeParents: data.nodeParents ?? {},
     viewport: data.viewport ?? { x: 0, y: 0, zoom: 1 },
     activeLevel: data.activeLevel ?? 'L1',
     navigationStack: data.navigationStack ?? [],

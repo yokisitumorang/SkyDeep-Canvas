@@ -10,6 +10,7 @@ export interface ToolbarProps {
   onSave: () => void;
   onSaveAs: () => void;
   onCreateElement: (data: CreateElementFormData) => Promise<void>;
+  onAddText: () => void;
   currentLevel: C4Level;
   parentId?: string;
   isSupported: boolean;
@@ -24,6 +25,7 @@ export default function Toolbar({
   onSave,
   onSaveAs,
   onCreateElement,
+  onAddText,
   currentLevel,
   parentId,
   isSupported,
@@ -80,6 +82,13 @@ export default function Toolbar({
           className={btnSecondary}
         >
           + Element
+        </button>
+        <button
+          type="button"
+          onClick={onAddText}
+          className={btnSecondary}
+        >
+          + Text
         </button>
 
         {/* Workspace name + saving indicators */}

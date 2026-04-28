@@ -34,6 +34,7 @@ export interface ReactFlowNode {
   parentId?: string;
   extent?: 'parent';
   style?: Record<string, unknown>;
+  selected?: boolean;
 }
 
 /** React Flow edge shape used by the store */

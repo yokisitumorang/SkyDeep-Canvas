@@ -8,8 +8,8 @@
  * - code      → L4 (Code units within a component)
  */
 
-/** The four C4 element types */
-export type C4Type = 'system' | 'container' | 'component' | 'code';
+/** The four C4 element types plus canvas-only annotation types */
+export type C4Type = 'system' | 'container' | 'component' | 'code' | 'text' | 'group';
 
 /** The four C4 hierarchy levels */
 export type C4Level = 'L1' | 'L2' | 'L3' | 'L4';
@@ -41,6 +41,7 @@ export interface C4NodeData {
   c4Type: C4Type;
   hasChildren: boolean;
   customColor?: string;
+  font?: 'default' | 'virgil';
   onDrillDown: (nodeId: string) => void;
   onEdit: (nodeId: string) => void;
 }
