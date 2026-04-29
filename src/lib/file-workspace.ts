@@ -5,7 +5,7 @@
  */
 
 import type { ArchitectureElement, C4Level } from '@/types/c4';
-import type { NavigationEntry } from '@/store/diagram-store';
+import type { NavigationEntry, SubCanvasEntry } from '@/store/diagram-store';
 
 /** The file format version for forward compatibility */
 const FILE_FORMAT_VERSION = 1;
@@ -34,11 +34,29 @@ export interface WorkspaceFile {
   nodeColors: Record<string, string>;
   /** Saved text node fonts keyed by node id */
   textFonts: Record<string, string>;
+  /** Saved text node font sizes keyed by node id */
+  textFontSizes?: Record<string, number>;
   /** Saved node parent relationships keyed by node id */
   nodeParents: Record<string, { parentId: string; extent?: 'parent' }>;
+  /** Directly saved edges for full-fidelity restore (handles, labels, multiple edges per pair) */
+  edges?: Array<{
+    id: string;
+    source: string;
+    target: string;
+    sourceHandle?: string;
+    targetHandle?: string;
+    type?: string;
+    label?: string;
+    markerEnd?: { type: string; width?: number; height?: number; color?: string };
+    markerStart?: { type: string; width?: number; height?: number; color?: string };
+  }>;
   viewport: { x: number; y: number; zoom: number };
   activeLevel: C4Level;
   navigationStack: NavigationEntry[];
+  /** Active sub-canvas navigation path (optional for backward compatibility) */
+  subCanvasStack?: SubCanvasEntry[];
+  /** Per-sheet viewport state keyed by parent ID ("root" for root canvas) */
+  sheetViewports?: Record<string, { x: number; y: number; zoom: number }>;
 }
 
 /**
@@ -53,10 +71,14 @@ export function createEmptyWorkspace(name: string): WorkspaceFile {
     edgeStyles: {},
     nodeColors: {},
     textFonts: {},
+    textFontSizes: {},
     nodeParents: {},
+    edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
     activeLevel: 'L1',
     navigationStack: [],
+    subCanvasStack: [],
+    sheetViewports: {},
   };
 }
 
@@ -90,10 +112,14 @@ export function parseWorkspace(json: string): WorkspaceFile {
     edgeStyles: data.edgeStyles ?? {},
     nodeColors: data.nodeColors ?? {},
     textFonts: data.textFonts ?? {},
+    textFontSizes: data.textFontSizes ?? {},
     nodeParents: data.nodeParents ?? {},
+    edges: data.edges ?? [],
     viewport: data.viewport ?? { x: 0, y: 0, zoom: 1 },
     activeLevel: data.activeLevel ?? 'L1',
     navigationStack: data.navigationStack ?? [],
+    subCanvasStack: data.subCanvasStack ?? [],
+    sheetViewports: data.sheetViewports ?? {},
   };
 }
 

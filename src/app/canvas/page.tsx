@@ -7,6 +7,8 @@ import ReactFlow, {
   Controls,
   MiniMap,
   Panel,
+  MarkerType,
+  useReactFlow,
   type Viewport,
   type NodeChange,
   type EdgeChange,
@@ -27,19 +29,24 @@ import CodeNode from '@/components/nodes/CodeNode';
 import BoundaryGroupNode from '@/components/nodes/BoundaryGroupNode';
 import TextNode from '@/components/nodes/TextNode';
 import LabeledGroupNode from '@/components/nodes/LabeledGroupNode';
+import SimpleNode from '@/components/nodes/SimpleNode';
 import type { NodeTypes } from 'reactflow';
 import Toolbar from '@/components/Toolbar';
+import { Breadcrumb } from '@/components/Breadcrumb';
+import SheetTabBar from '@/components/SheetTabBar';
 import {
   useDiagramStore,
   useNodes,
   useEdges,
   useActiveLevel,
   useNavigationStack,
+  useSubCanvasStack,
 } from '@/store/diagram-store';
 import type { ReactFlowNode, ReactFlowEdge } from '@/store/diagram-store';
+import { initHistory, undo, redo, clearHistory } from '@/store/history';
 import type { CreateElementFormData } from '@/components/CreateElementForm';
 import EditElementForm from '@/components/EditElementForm';
-import EdgeContextMenu from '@/components/EdgeContextMenu';
+import EdgeContextMenu, { type ArrowStyle } from '@/components/EdgeContextMenu';
 import NodeContextMenu from '@/components/NodeContextMenu';
 import TextContextMenu, { type TextFont } from '@/components/TextContextMenu';
 import { generateId } from '@/lib/serializer';
@@ -75,6 +82,7 @@ const nodeTypes: NodeTypes = {
   boundary: BoundaryGroupNode,
   text: TextNode,
   group: LabeledGroupNode,
+  simple: SimpleNode,
 };
 
 const defaultEdgeOptions = { type: 'smoothstep' as const };
@@ -84,7 +92,9 @@ function CanvasContent() {
   const edges = useEdges();
   const activeLevel = useActiveLevel();
   const navigationStack = useNavigationStack();
+  const subCanvasStack = useSubCanvasStack();
   const workspaceName = useDiagramStore((s) => s.workspaceName);
+  const { fitView } = useReactFlow();
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSupported, setIsSupported] = useState(true);
@@ -96,6 +106,7 @@ function CanvasContent() {
     y: number;
     edgeId: string;
     edgeType: string;
+    arrowStyle: ArrowStyle;
   } | null>(null);
   const [nodeMenu, setNodeMenu] = useState<{
     x: number;
@@ -121,10 +132,22 @@ function CanvasContent() {
   const setEdges = useDiagramStore((s) => s.setEdges);
   const setViewport = useDiagramStore((s) => s.setViewport);
 
+  // Initialize undo/redo history tracking
+  useEffect(() => {
+    const cleanup = initHistory();
+    return cleanup;
+  }, []);
+
   const currentParentId =
-    navigationStack.length > 0
-      ? navigationStack[navigationStack.length - 1].parentId ?? undefined
-      : undefined;
+    subCanvasStack.length > 0
+      ? subCanvasStack[subCanvasStack.length - 1].parentId
+      : navigationStack.length > 0
+        ? navigationStack[navigationStack.length - 1].parentId ?? undefined
+        : undefined;
+
+  // Stable ref for renderElements — allows callbacks defined before renderElements to call it
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderElementsRef = useRef<((...args: any[]) => Promise<void>) | null>(null);
 
   // Override callbacks in node data
   const nodesWithCallbacks = useMemo(() => {
@@ -132,8 +155,18 @@ function CanvasContent() {
       ...node,
       data: {
         ...node.data,
-        onDrillDown: (nodeId: string) => {
-          useDiagramStore.getState().drillDown(nodeId);
+        onDrillDown: async (nodeId: string) => {
+          // Save current nodes/edges, then navigate (store swaps to target sheet's saved state)
+          useDiagramStore.getState().navigateToSubCanvas(nodeId);
+          const store = useDiagramStore.getState();
+          // Only call renderElements for first visit (no saved nodes for this sheet).
+          // For previously visited sheets, the store already restored the correct nodes/edges,
+          // and nodesWithCallbacks will re-wrap them with callbacks on next React render.
+          if (store.nodes.length === 0) {
+            await renderElementsRef.current?.(store.allElements);
+          }
+          // Fit view so the user can see all nodes on the target sheet
+          setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
         },
         onEdit: (nodeId: string) => {
           setEditingElementId(nodeId);
@@ -145,6 +178,14 @@ function CanvasContent() {
             store.setNodes(
               store.nodes.map((n) =>
                 n.id === nodeId ? { ...n, data: { ...n.data, name: text, autoFocus: false } } : n
+              )
+            );
+          },
+          onFontSizeChange: (nodeId: string, size: number) => {
+            const store = useDiagramStore.getState();
+            store.setNodes(
+              store.nodes.map((n) =>
+                n.id === nodeId ? { ...n, data: { ...n.data, fontSize: size } } : n
               )
             );
           },
@@ -225,11 +266,19 @@ function CanvasContent() {
   const handleEdgeContextMenu = useCallback(
     (event: React.MouseEvent, edge: Edge) => {
       event.preventDefault();
+      // Detect current arrow style from markers
+      const hasEnd = !!edge.markerEnd;
+      const hasStart = !!edge.markerStart;
+      let arrowStyle: ArrowStyle = 'none';
+      if (hasEnd && hasStart) arrowStyle = 'both';
+      else if (hasEnd) arrowStyle = 'target';
+
       setEdgeMenu({
         x: event.clientX,
         y: event.clientY,
         edgeId: edge.id,
         edgeType: edge.type ?? 'smoothstep',
+        arrowStyle,
       });
     },
     []
@@ -244,6 +293,36 @@ function CanvasContent() {
       store.setEdges(updatedEdges);
     },
     []
+  );
+
+  const arrowMarker = useMemo(() => ({
+    type: MarkerType.ArrowClosed,
+    width: 16,
+    height: 16,
+    color: '#94a3b8',
+  }), []);
+
+  const handleChangeArrowStyle = useCallback(
+    (edgeId: string, arrow: ArrowStyle) => {
+      const store = useDiagramStore.getState();
+      const updatedEdges = store.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const updated = { ...e };
+        if (arrow === 'none') {
+          delete updated.markerEnd;
+          delete updated.markerStart;
+        } else if (arrow === 'target') {
+          updated.markerEnd = arrowMarker;
+          delete updated.markerStart;
+        } else if (arrow === 'both') {
+          updated.markerEnd = arrowMarker;
+          updated.markerStart = arrowMarker;
+        }
+        return updated;
+      });
+      store.setEdges(updatedEdges);
+    },
+    [arrowMarker]
   );
 
   const handleNodeContextMenu = useCallback(
@@ -393,9 +472,11 @@ function CanvasContent() {
       if (!connection.source || !connection.target) return;
 
       const store = useDiagramStore.getState();
-      const edgeId = `${connection.source}-${connection.target}`;
 
-      // Skip if this edge already exists
+      // Use source/target + handle IDs for a unique edge key, allowing multiple connections
+      const edgeId = `${connection.source}:${connection.sourceHandle ?? 'default'}-${connection.target}:${connection.targetHandle ?? 'default'}`;
+
+      // Skip only if this exact same connection (same handles) already exists
       if (store.edges.some((e) => e.id === edgeId)) return;
 
       // Add edge to the canvas
@@ -526,7 +607,9 @@ function CanvasContent() {
       savedEdgeStyles: Record<string, { type?: string; sourceHandle?: string; targetHandle?: string }> = {},
       savedNodeColors: Record<string, string> = {},
       savedTextFonts: Record<string, string> = {},
-      savedNodeParents: Record<string, { parentId: string; extent?: 'parent' }> = {}
+      savedTextFontSizes: Record<string, number> = {},
+      savedNodeParents: Record<string, { parentId: string; extent?: 'parent' }> = {},
+      savedEdges?: Array<{ id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; type?: string; label?: string; markerEnd?: { type: string; width?: number; height?: number; color?: string }; markerStart?: { type: string; width?: number; height?: number; color?: string } }>
     ) => {
       const store = useDiagramStore.getState();
 
@@ -538,30 +621,41 @@ function CanvasContent() {
       };
       const activeType = levelTypeMap[store.activeLevel];
 
-      const navStack = store.navigationStack;
-      const currentParent =
-        navStack.length > 0
-          ? navStack[navStack.length - 1].parentId
-          : null;
+      const subCanvasStack = store.subCanvasStack;
 
-      let filteredElements = elements.filter((el) => {
-        // Text and group nodes are canvas annotations — always visible at the current level/parent
-        if (el.type === 'text' || el.type === 'group') {
+      let filteredElements: ArchitectureElement[];
+
+      if (subCanvasStack.length > 0) {
+        // Sub-canvas mode: show ALL element types whose parentId matches the active sub-canvas parent
+        const activeParentId = subCanvasStack[subCanvasStack.length - 1].parentId;
+        filteredElements = elements.filter((el) => el.parentId === activeParentId);
+      } else {
+        // Root/C4-level mode: preserve existing C4-level filtering behavior
+        const navStack = store.navigationStack;
+        const currentParent =
+          navStack.length > 0
+            ? navStack[navStack.length - 1].parentId
+            : null;
+
+        filteredElements = elements.filter((el) => {
+          // Text, group, and simple nodes are canvas annotations — always visible at the current level/parent
+          if (el.type === 'text' || el.type === 'group' || el.type === 'simple') {
+            if (currentParent !== null) {
+              return el.parentId === currentParent;
+            }
+            return !el.parentId;
+          }
+          if (el.type !== activeType) return false;
           if (currentParent !== null) {
             return el.parentId === currentParent;
           }
-          return !el.parentId;
-        }
-        if (el.type !== activeType) return false;
-        if (currentParent !== null) {
-          return el.parentId === currentParent;
-        }
-        return true;
-      });
+          return true;
+        });
 
-      // Fallback: show all top-level elements if none match the active level
-      if (filteredElements.filter((el) => el.type !== 'text' && el.type !== 'group').length === 0 && currentParent === null) {
-        filteredElements = elements.filter((el) => !el.parentId);
+        // Fallback: show all top-level elements if none match the active level
+        if (filteredElements.filter((el) => el.type !== 'text' && el.type !== 'group' && el.type !== 'simple').length === 0 && currentParent === null) {
+          filteredElements = elements.filter((el) => !el.parentId);
+        }
       }
 
       const rfNodes = elementsToNodes(filteredElements, elements);
@@ -606,6 +700,7 @@ function CanvasContent() {
         const layoutPos = layoutPositionMap.get(node.id);
         const savedColor = savedNodeColors[node.id];
         const savedFont = savedTextFonts[node.id];
+        const savedFontSize = savedTextFontSizes[node.id];
         const savedParent = savedNodeParents[node.id];
         return {
           ...node,
@@ -616,8 +711,23 @@ function CanvasContent() {
           data: {
             ...node.data,
             ...(node.type === 'group' ? { label: node.data.name } : {}),
+            ...(node.type === 'simple' ? { label: node.data.name, onLabelChange: (newLabel: string) => {
+              const s = useDiagramStore.getState();
+              // Update the element name in the store
+              const updatedElements = s.allElements.map((el) =>
+                el.id === node.id ? { ...el, name: newLabel } : el
+              );
+              s.setElements(updatedElements, []);
+              // Update the node data
+              s.setNodes(
+                s.nodes.map((n) =>
+                  n.id === node.id ? { ...n, data: { ...n.data, label: newLabel } } : n
+                ),
+              );
+            }} : {}),
             ...(savedColor ? { customColor: savedColor } : {}),
             ...(savedFont ? { font: savedFont } : {}),
+            ...(savedFontSize ? { fontSize: savedFontSize } : {}),
           },
           ...(saved?.width || saved?.height
             ? {
@@ -640,23 +750,45 @@ function CanvasContent() {
 
       store.setNodes(sortedNodes);
 
-      // Apply saved edge styles (type, handles)
-      const styledEdges = rfEdges.map((edge) => {
-        const saved = savedEdgeStyles[edge.id];
-        if (saved) {
-          return {
-            ...edge,
-            type: saved.type ?? edge.type,
-            sourceHandle: saved.sourceHandle ?? edge.sourceHandle,
-            targetHandle: saved.targetHandle ?? edge.targetHandle,
-          };
-        }
-        return edge;
-      });
-      store.setEdges(styledEdges);
+      // Restore edges: prefer directly saved edges, fall back to relationship-derived edges
+      let finalEdges: ReactFlowEdge[];
+      if (savedEdges && savedEdges.length > 0) {
+        // Use directly saved edges for full fidelity (handles, multiple edges per pair)
+        finalEdges = savedEdges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+          type: e.type ?? 'smoothstep',
+          label: e.label,
+          data: { hasWarning: false },
+          ...(e.markerEnd ? { markerEnd: { ...e.markerEnd, type: e.markerEnd.type === 'arrowclosed' ? MarkerType.ArrowClosed : MarkerType.Arrow } } : {}),
+          ...(e.markerStart ? { markerStart: { ...e.markerStart, type: e.markerStart.type === 'arrowclosed' ? MarkerType.ArrowClosed : MarkerType.Arrow } } : {}),
+        }));
+      } else {
+        // Backward compatibility: derive edges from element relationships + apply saved styles
+        const styledEdges = rfEdges.map((edge) => {
+          const saved = savedEdgeStyles[edge.id];
+          if (saved) {
+            return {
+              ...edge,
+              type: saved.type ?? edge.type,
+              sourceHandle: saved.sourceHandle ?? edge.sourceHandle,
+              targetHandle: saved.targetHandle ?? edge.targetHandle,
+            };
+          }
+          return edge;
+        });
+        finalEdges = styledEdges;
+      }
+      store.setEdges(finalEdges);
     },
     []
   );
+
+  // Keep the ref in sync so callbacks defined before renderElements can call it
+  renderElementsRef.current = renderElements;
 
   /**
    * Loads a workspace file into the store and renders it.
@@ -668,16 +800,33 @@ function CanvasContent() {
       store.setFileHandle(handle, workspace.name);
       store.setElements(workspace.elements, []);
 
+      // Validate subCanvasStack: filter out entries referencing deleted elements
+      const elementIds = new Set(workspace.elements.map((el) => el.id));
+      const rawStack = workspace.subCanvasStack ?? [];
+      const validatedStack = rawStack.filter((entry) => elementIds.has(entry.parentId));
+
+      // Determine the active sheet's viewport
+      const restoredSheetViewports = workspace.sheetViewports ?? {};
+      const activeSheetKey =
+        validatedStack.length > 0
+          ? validatedStack[validatedStack.length - 1].parentId
+          : 'root';
+      const activeViewport =
+        restoredSheetViewports[activeSheetKey] ?? workspace.viewport;
+
       useDiagramStore.setState({
         activeLevel: workspace.activeLevel,
         navigationStack: workspace.navigationStack,
-        viewport: workspace.viewport,
+        viewport: activeViewport,
+        subCanvasStack: validatedStack,
+        sheetViewports: restoredSheetViewports,
       });
 
       // Pass saved positions so nodes keep their positions from the file
-      await renderElements(workspace.elements, workspace.positions ?? {}, workspace.edgeStyles ?? {}, workspace.nodeColors ?? {}, workspace.textFonts ?? {}, workspace.nodeParents ?? {});
+      await renderElements(workspace.elements, workspace.positions ?? {}, workspace.edgeStyles ?? {}, workspace.nodeColors ?? {}, workspace.textFonts ?? {}, workspace.textFontSizes ?? {}, workspace.nodeParents ?? {}, workspace.edges);
 
-      store.setViewport(workspace.viewport);
+      store.setViewport(activeViewport);
+      clearHistory();
     },
     [renderElements]
   );
@@ -734,6 +883,16 @@ function CanvasContent() {
     return textFonts;
   }, []);
 
+  const captureTextFontSizes = useCallback(() => {
+    const store = useDiagramStore.getState();
+    const sizes: Record<string, number> = {};
+    for (const node of store.nodes) {
+      const size = node.data.fontSize as number | undefined;
+      if (size) sizes[node.id] = size;
+    }
+    return sizes;
+  }, []);
+
   /** Captures parentId/extent for grouped nodes. */
   const captureNodeParents = useCallback(() => {
     const store = useDiagramStore.getState();
@@ -750,16 +909,85 @@ function CanvasContent() {
   }, []);
 
   /**
+   * Collects ALL nodes across every sheet (current + sheetNodeData).
+   * This ensures save captures positions/colors/fonts for nodes on all sheets,
+   * not just the currently visible sheet.
+   */
+  const collectAllSheetNodes = useCallback(() => {
+    const store = useDiagramStore.getState();
+    const allNodes: ReactFlowNode[] = [...store.nodes];
+    const allEdges: ReactFlowEdge[] = [...store.edges];
+
+    // Add nodes/edges from other sheets stored in sheetNodeData
+    const currentNodeIds = new Set(store.nodes.map((n) => n.id));
+    const currentEdgeIds = new Set(store.edges.map((e) => e.id));
+
+    for (const sheetData of Object.values(store.sheetNodeData)) {
+      for (const node of sheetData.nodes) {
+        if (!currentNodeIds.has(node.id)) {
+          allNodes.push(node);
+          currentNodeIds.add(node.id);
+        }
+      }
+      for (const edge of sheetData.edges) {
+        if (!currentEdgeIds.has(edge.id)) {
+          allEdges.push(edge);
+          currentEdgeIds.add(edge.id);
+        }
+      }
+    }
+
+    return { allNodes, allEdges };
+  }, []);
+
+  /**
    * Builds the current WorkspaceFile from store state for saving.
-   * Captures current node positions so they persist across save/open.
+   * Captures node positions from ALL sheets so they persist across save/open.
    */
   const buildWorkspaceFile = useCallback((): WorkspaceFile => {
     const store = useDiagramStore.getState();
-    const positions = capturePositions();
-    const edgeStyles = captureEdgeStyles();
-    const nodeColors = captureNodeColors();
-    const textFonts = captureTextFonts();
-    const nodeParents = captureNodeParents();
+    const { allNodes, allEdges } = collectAllSheetNodes();
+
+    // Capture positions from all sheets' nodes
+    const positions: Record<string, { x: number; y: number; width?: number; height?: number }> = {};
+    for (const node of allNodes) {
+      const w = node.style?.width as number | undefined;
+      const h = node.style?.height as number | undefined;
+      positions[node.id] = {
+        x: node.position.x,
+        y: node.position.y,
+        ...(w ? { width: w } : {}),
+        ...(h ? { height: h } : {}),
+      };
+    }
+
+    const edgeStyles: Record<string, { type?: string; sourceHandle?: string; targetHandle?: string }> = {};
+    for (const edge of allEdges) {
+      edgeStyles[edge.id] = {
+        ...(edge.type ? { type: edge.type } : {}),
+        ...(edge.sourceHandle ? { sourceHandle: edge.sourceHandle } : {}),
+        ...(edge.targetHandle ? { targetHandle: edge.targetHandle } : {}),
+      };
+    }
+
+    const nodeColors: Record<string, string> = {};
+    const textFonts: Record<string, string> = {};
+    const textFontSizes: Record<string, number> = {};
+    const nodeParents: Record<string, { parentId: string; extent?: 'parent' }> = {};
+    for (const node of allNodes) {
+      const color = node.data.customColor as string | undefined;
+      if (color) nodeColors[node.id] = color;
+      const font = node.data.font as string | undefined;
+      if (font) textFonts[node.id] = font;
+      const size = node.data.fontSize as number | undefined;
+      if (size) textFontSizes[node.id] = size;
+      if (node.parentId) {
+        nodeParents[node.id] = {
+          parentId: node.parentId,
+          ...(node.extent === 'parent' ? { extent: 'parent' as const } : {}),
+        };
+      }
+    }
 
     return {
       version: 1,
@@ -769,12 +997,26 @@ function CanvasContent() {
       edgeStyles,
       nodeColors,
       textFonts,
+      textFontSizes,
       nodeParents,
+      edges: allEdges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
+        ...(e.targetHandle ? { targetHandle: e.targetHandle } : {}),
+        ...(e.type ? { type: e.type } : {}),
+        ...(e.label ? { label: e.label as string } : {}),
+        ...(e.markerEnd && typeof e.markerEnd === 'object' ? { markerEnd: e.markerEnd } : {}),
+        ...(e.markerStart && typeof e.markerStart === 'object' ? { markerStart: e.markerStart } : {}),
+      })),
       viewport: store.viewport,
       activeLevel: store.activeLevel,
       navigationStack: store.navigationStack,
+      subCanvasStack: store.subCanvasStack,
+      sheetViewports: store.sheetViewports,
     };
-  }, [capturePositions, captureEdgeStyles, captureNodeColors, captureTextFonts, captureNodeParents]);
+  }, [collectAllSheetNodes]);
 
   /**
    * Auto-saves the current workspace state to IndexedDB.
@@ -792,62 +1034,8 @@ function CanvasContent() {
         // Don't save if there's nothing to save
         if (!store.workspaceName && store.allElements.length === 0) return;
 
-        const positions: Record<string, { x: number; y: number; width?: number; height?: number }> = {};
-        for (const node of store.nodes) {
-          const w = node.style?.width as number | undefined;
-          const h = node.style?.height as number | undefined;
-          positions[node.id] = {
-            x: node.position.x,
-            y: node.position.y,
-            ...(w ? { width: w } : {}),
-            ...(h ? { height: h } : {}),
-          };
-        }
-
-        const edgeStyles: Record<string, { type?: string; sourceHandle?: string; targetHandle?: string }> = {};
-        for (const edge of store.edges) {
-          edgeStyles[edge.id] = {
-            ...(edge.type ? { type: edge.type } : {}),
-            ...(edge.sourceHandle ? { sourceHandle: edge.sourceHandle } : {}),
-            ...(edge.targetHandle ? { targetHandle: edge.targetHandle } : {}),
-          };
-        }
-
-        const nodeColors: Record<string, string> = {};
-        for (const node of store.nodes) {
-          const color = node.data.customColor as string | undefined;
-          if (color) nodeColors[node.id] = color;
-        }
-
-        const textFonts: Record<string, string> = {};
-        for (const node of store.nodes) {
-          const font = node.data.font as string | undefined;
-          if (font) textFonts[node.id] = font;
-        }
-
-        const nodeParents: Record<string, { parentId: string; extent?: 'parent' }> = {};
-        for (const node of store.nodes) {
-          if (node.parentId) {
-            nodeParents[node.id] = {
-              parentId: node.parentId,
-              ...(node.extent === 'parent' ? { extent: 'parent' as const } : {}),
-            };
-          }
-        }
-
-        const workspace: WorkspaceFile = {
-          version: 1,
-          name: store.workspaceName ?? 'Untitled',
-          elements: store.allElements,
-          positions,
-          edgeStyles,
-          nodeColors,
-          textFonts,
-          nodeParents,
-          viewport: store.viewport,
-          activeLevel: store.activeLevel,
-          navigationStack: store.navigationStack,
-        };
+        // Use buildWorkspaceFile to capture ALL sheets' data consistently
+        const workspace = buildWorkspaceFile();
         setIsSaving(true);
         saveWorkspaceState(workspace)
           .catch((err) => {
@@ -865,7 +1053,7 @@ function CanvasContent() {
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, []);
+  }, [buildWorkspaceFile]);
 
   // --- Toolbar handlers ---
 
@@ -880,9 +1068,13 @@ function CanvasContent() {
       activeLevel: 'L1',
       navigationStack: [],
       viewport: { x: 0, y: 0, zoom: 1 },
+      subCanvasStack: [],
+      sheetViewports: {},
+      sheetNodeData: {},
     });
 
     clearWorkspaceState().catch(() => {});
+    clearHistory();
     toast.success('New workspace created');
   }, []);
 
@@ -983,7 +1175,7 @@ function CanvasContent() {
       const currentNodeColors = captureNodeColors();
 
       // Re-render, preserving existing positions and edge styles
-      await renderElements(useDiagramStore.getState().allElements, currentPositions, currentEdgeStyles, currentNodeColors, captureTextFonts(), captureNodeParents());
+      await renderElements(useDiagramStore.getState().allElements, currentPositions, currentEdgeStyles, currentNodeColors, captureTextFonts(), captureTextFontSizes(), captureNodeParents());
 
       toast.success('Element created');
     },
@@ -1026,11 +1218,87 @@ function CanvasContent() {
     store.setNodes([...store.nodes, newNode]);
   }, [currentParentId]);
 
+  const handleAddSimpleNode = useCallback(() => {
+    const store = useDiagramStore.getState();
+    const id = generateId();
+
+    // Create the element so it persists in allElements
+    const element: ArchitectureElement = {
+      id,
+      type: 'simple',
+      name: 'Simple Node',
+      description: '',
+      ...(currentParentId ? { parentId: currentParentId } : {}),
+      relationships: [],
+    };
+
+    store.addElement(element);
+
+    const vp = store.viewport;
+    const x = (-vp.x + window.innerWidth / 2) / vp.zoom - 110;
+    const y = (-vp.y + window.innerHeight / 2) / vp.zoom - 40;
+
+    const newNode: ReactFlowNode = {
+      id,
+      type: 'simple',
+      position: { x, y },
+      data: {
+        label: 'Simple Node',
+        description: '',
+        onLabelChange: (newLabel: string) => {
+          const s = useDiagramStore.getState();
+          const updatedElements = s.allElements.map((el) =>
+            el.id === id ? { ...el, name: newLabel } : el
+          );
+          s.setElements(updatedElements, []);
+          s.setNodes(
+            s.nodes.map((n) =>
+              n.id === id ? { ...n, data: { ...n.data, label: newLabel } } : n,
+            ),
+          );
+        },
+      },
+    };
+
+    store.setNodes([...store.nodes, newNode]);
+  }, [currentParentId]);
+
   // Copy/paste clipboard ref — holds copied node+element pairs
   const clipboardRef = useRef<Array<{ node: ReactFlowNode; element: ArchitectureElement }>>([]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Ctrl+S / Cmd+S — save to file (works even when focused on inputs)
+      if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+
+      // Ctrl+Z / Cmd+Z — undo (works even when focused on inputs)
+      if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        const result = undo();
+        if (result === 'empty') toast.info('Nothing to undo');
+        return;
+      }
+
+      // Ctrl+Shift+Z / Cmd+Shift+Z — redo (works even when focused on inputs)
+      if (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        const result = redo();
+        if (result === 'empty') toast.info('Nothing to redo');
+        return;
+      }
+
+      // Ctrl+Y / Cmd+Y — redo alternative
+      if (e.key === 'y' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        const result = redo();
+        if (result === 'empty') toast.info('Nothing to redo');
+        return;
+      }
+
       // Ignore when typing in an input/textarea
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -1079,7 +1347,7 @@ function CanvasContent() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [handleSave]);
 
   // Detect API support after mount
   useEffect(() => {
@@ -1113,18 +1381,36 @@ function CanvasContent() {
           // Load from cached state (preserves unsaved changes)
           const store = useDiagramStore.getState();
           store.setElements(cachedState.elements, []);
+
+          // Validate subCanvasStack: filter out entries referencing deleted elements
+          const elementIds = new Set(cachedState.elements.map((el: ArchitectureElement) => el.id));
+          const rawStack = cachedState.subCanvasStack ?? [];
+          const validatedStack = rawStack.filter((entry: { parentId: string }) => elementIds.has(entry.parentId));
+
+          // Determine the active sheet's viewport
+          const restoredSheetViewports = cachedState.sheetViewports ?? {};
+          const activeSheetKey =
+            validatedStack.length > 0
+              ? validatedStack[validatedStack.length - 1].parentId
+              : 'root';
+          const activeViewport =
+            restoredSheetViewports[activeSheetKey] ?? cachedState.viewport ?? { x: 0, y: 0, zoom: 1 };
+
           useDiagramStore.setState({
             workspaceName: cachedState.name,
             activeLevel: cachedState.activeLevel ?? 'L1',
             navigationStack: cachedState.navigationStack ?? [],
-            viewport: cachedState.viewport ?? { x: 0, y: 0, zoom: 1 },
+            viewport: activeViewport,
+            subCanvasStack: validatedStack,
+            sheetViewports: restoredSheetViewports,
           });
 
-          await renderElements(cachedState.elements, cachedState.positions ?? {}, cachedState.edgeStyles ?? {}, cachedState.nodeColors ?? {}, cachedState.textFonts ?? {}, cachedState.nodeParents ?? {});
-          store.setViewport(cachedState.viewport ?? { x: 0, y: 0, zoom: 1 });
+          await renderElements(cachedState.elements, cachedState.positions ?? {}, cachedState.edgeStyles ?? {}, cachedState.nodeColors ?? {}, cachedState.textFonts ?? {}, cachedState.textFontSizes ?? {}, cachedState.nodeParents ?? {}, cachedState.edges);
+          store.setViewport(activeViewport);
 
           toast.success(`Restored "${cachedState.name}"`);
           setIsLoading(false);
+          clearHistory();
           return;
         }
 
@@ -1166,6 +1452,7 @@ function CanvasContent() {
           onSaveAs={handleSaveAs}
           onCreateElement={handleCreateElement}
           onAddText={handleAddTextNode}
+          onAddSimpleNode={handleAddSimpleNode}
           currentLevel={activeLevel}
           parentId={currentParentId}
           isSupported={isSupported}
@@ -1174,6 +1461,40 @@ function CanvasContent() {
           isSavingFile={isSavingToFile}
         />
       </div>
+
+      {/* Breadcrumb navigation */}
+      {(navigationStack.length > 0 || subCanvasStack.length > 0) && (
+        <div className="flex-shrink-0 px-3 py-2 bg-white border-b border-slate-200">
+          <Breadcrumb
+            stack={navigationStack}
+            onNavigate={async (index: number) => {
+              useDiagramStore.getState().navigateToBreadcrumb(index);
+              const store = useDiagramStore.getState();
+              await renderElements(
+                store.allElements,
+                capturePositions(),
+                captureEdgeStyles(),
+                captureNodeColors(),
+                captureTextFonts(),
+                captureTextFontSizes(),
+                captureNodeParents(),
+              );
+            }}
+            subCanvasStack={subCanvasStack}
+            onSubCanvasNavigate={async (index: number) => {
+              // Store saves current nodes/edges and restores target sheet's state
+              useDiagramStore.getState().navigateToSheet(index);
+              const store = useDiagramStore.getState();
+              // Only call renderElements for first visit (no saved nodes for this sheet)
+              if (store.nodes.length === 0) {
+                await renderElements(store.allElements);
+              }
+              // Fit view so the user can see all nodes on the target sheet
+              setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
+            }}
+          />
+        </div>
+      )}
 
       <div className="flex-1 relative">
         {isLoading && (
@@ -1204,7 +1525,7 @@ function CanvasContent() {
         )}
 
         {showEmptyState && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 z-[1] flex items-center justify-center pointer-events-none">
             <div className="text-center max-w-md pointer-events-auto">
               <p className="text-sm font-medium text-slate-500">
                 No elements yet. Open a .c4.json file or create an element to get started.
@@ -1255,6 +1576,25 @@ function CanvasContent() {
         </ReactFlow>
       </div>
 
+      {/* Sheet tab bar for sub-canvas navigation */}
+      {subCanvasStack.length > 0 && (
+        <SheetTabBar
+          subCanvasStack={subCanvasStack}
+          activeIndex={subCanvasStack.length - 1}
+          onSelectSheet={async (index: number) => {
+            // Store saves current nodes/edges and restores target sheet's state
+            useDiagramStore.getState().navigateToSheet(index);
+            const store = useDiagramStore.getState();
+            // Only call renderElements for first visit (no saved nodes for this sheet)
+            if (store.nodes.length === 0) {
+              await renderElements(store.allElements);
+            }
+            // Fit view so the user can see all nodes on the target sheet
+            setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
+          }}
+        />
+      )}
+
       <Toaster position="bottom-right" />
 
       {/* Edge context menu */}
@@ -1264,7 +1604,9 @@ function CanvasContent() {
           y={edgeMenu.y}
           edgeId={edgeMenu.edgeId}
           currentType={edgeMenu.edgeType}
+          currentArrow={edgeMenu.arrowStyle}
           onChangeType={handleChangeEdgeType}
+          onChangeArrow={handleChangeArrowStyle}
           onClose={() => setEdgeMenu(null)}
         />
       )}
@@ -1281,6 +1623,17 @@ function CanvasContent() {
           onChangeColor={handleChangeNodeColor}
           onChangeFont={handleChangeTextFont}
           onUngroup={handleUngroup}
+          onCreateSubLevel={async (nodeId: string) => {
+            // Store saves current nodes/edges and restores target sheet's state
+            useDiagramStore.getState().navigateToSubCanvas(nodeId);
+            const store = useDiagramStore.getState();
+            // Only call renderElements for first visit (no saved nodes for this sheet)
+            if (store.nodes.length === 0) {
+              await renderElements(store.allElements);
+            }
+            // Fit view so the user can see all nodes on the target sheet
+            setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50);
+          }}
           onClose={() => setNodeMenu(null)}
         />
       )}

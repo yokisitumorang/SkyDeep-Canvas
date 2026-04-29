@@ -27,6 +27,7 @@ export function elementsToNodes(
         technology: element.technology,
         c4Type: element.type,
         hasChildren,
+        ...(element.type === 'simple' ? { label: element.name } : {}),
         onDrillDown: () => {},
         onEdit: () => {},
       },

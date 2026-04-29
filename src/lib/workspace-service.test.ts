@@ -68,7 +68,7 @@ describe('isSupported', () => {
   it('returns false when showDirectoryPicker is not available', () => {
     // Remove the property to simulate unsupported browser
     const descriptor = Object.getOwnPropertyDescriptor(window, 'showDirectoryPicker');
-    delete (window as Record<string, unknown>).showDirectoryPicker;
+    delete (window as unknown as Record<string, unknown>).showDirectoryPicker;
     expect(isSupported()).toBe(false);
 
     // Restore for other tests

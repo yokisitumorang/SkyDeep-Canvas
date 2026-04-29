@@ -1,6 +1,9 @@
 'use client';
 
+import { Layers } from 'lucide-react';
 import type { TextFont } from './TextContextMenu';
+
+const SUB_LEVEL_TYPES = new Set(['system', 'container', 'component', 'code', 'simple']);
 
 interface NodeContextMenuProps {
   x: number;
@@ -12,6 +15,7 @@ interface NodeContextMenuProps {
   onChangeColor: (nodeId: string, color: string | undefined) => void;
   onChangeFont: (nodeId: string, font: TextFont) => void;
   onUngroup?: (nodeId: string) => void;
+  onCreateSubLevel?: (nodeId: string) => void;
   onClose: () => void;
 }
 
@@ -41,9 +45,11 @@ export default function NodeContextMenu({
   onChangeColor,
   onChangeFont,
   onUngroup,
+  onCreateSubLevel,
   onClose,
 }: NodeContextMenuProps) {
   const isGroup = nodeType === 'group';
+  const canCreateSubLevel = !!nodeType && SUB_LEVEL_TYPES.has(nodeType);
 
   return (
     <>
@@ -53,47 +59,34 @@ export default function NodeContextMenu({
         className="fixed z-50 min-w-[160px] rounded-md bg-white shadow-lg ring-1 ring-slate-200 py-1"
         style={{ left: x, top: y }}
       >
-        {isGroup ? (
+        <p className="px-3 py-1.5 text-xs font-medium text-slate-400 uppercase tracking-wider">
+          Color
+        </p>
+        <div className="px-3 py-1.5 flex flex-wrap gap-1.5">
+          {COLOR_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              title={opt.label}
+              onClick={() => { onChangeColor(nodeId, opt.value); onClose(); }}
+              className={`w-6 h-6 rounded-full ${opt.bg} transition-transform hover:scale-110 ${
+                currentColor === opt.value ? 'ring-2 ring-offset-2 ring-slate-900' : ''
+              }`}
+            />
+          ))}
+        </div>
+        {currentColor && (
           <button
             type="button"
-            onClick={() => { onUngroup?.(nodeId); onClose(); }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-red-600 hover:bg-red-50 transition-colors"
+            onClick={() => { onChangeColor(nodeId, undefined); onClose(); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 transition-colors"
           >
-            <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 3h7v7H3z" /><path d="M14 3h7v7h-7z" />
-              <path d="M3 14h7v7H3z" /><path d="M14 14h7v7h-7z" />
-            </svg>
-            Ungroup
+            Reset color
           </button>
-        ) : (
-          <>
-            <p className="px-3 py-1.5 text-xs font-medium text-slate-400 uppercase tracking-wider">
-              Color
-            </p>
-            <div className="px-3 py-1.5 flex flex-wrap gap-1.5">
-              {COLOR_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  title={opt.label}
-                  onClick={() => { onChangeColor(nodeId, opt.value); onClose(); }}
-                  className={`w-6 h-6 rounded-full ${opt.bg} transition-transform hover:scale-110 ${
-                    currentColor === opt.value ? 'ring-2 ring-offset-2 ring-slate-900' : ''
-                  }`}
-                />
-              ))}
-            </div>
-            {currentColor && (
-              <button
-                type="button"
-                onClick={() => { onChangeColor(nodeId, undefined); onClose(); }}
-                className="w-full text-left px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50 transition-colors"
-              >
-                Reset color
-              </button>
-            )}
+        )}
 
+        {!isGroup && (
+          <>
             <div className="my-1 border-t border-slate-100" />
 
             <p className="px-3 py-1.5 text-xs font-medium text-slate-400 uppercase tracking-wider">
@@ -123,6 +116,38 @@ export default function NodeContextMenu({
                 )}
               </button>
             ))}
+          </>
+        )}
+
+        {isGroup && (
+          <>
+            <div className="my-1 border-t border-slate-100" />
+            <button
+              type="button"
+              onClick={() => { onUngroup?.(nodeId); onClose(); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-red-600 hover:bg-red-50 transition-colors"
+            >
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3h7v7H3z" /><path d="M14 3h7v7h-7z" />
+                <path d="M3 14h7v7H3z" /><path d="M14 14h7v7h-7z" />
+              </svg>
+              Ungroup
+            </button>
+          </>
+        )}
+
+        {canCreateSubLevel && (
+          <>
+            <div className="my-1 border-t border-slate-100" />
+            <button
+              type="button"
+              onClick={() => { onCreateSubLevel?.(nodeId); onClose(); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <Layers className="h-4 w-4 shrink-0" />
+              Create Sub Level
+            </button>
           </>
         )}
       </div>

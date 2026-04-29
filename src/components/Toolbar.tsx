@@ -3,6 +3,13 @@
 import { useState } from 'react';
 import type { C4Level } from '@/types/c4';
 import CreateElementForm, { type CreateElementFormData } from './CreateElementForm';
+import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 
 export interface ToolbarProps {
   onNew: () => void;
@@ -11,6 +18,7 @@ export interface ToolbarProps {
   onSaveAs: () => void;
   onCreateElement: (data: CreateElementFormData) => Promise<void>;
   onAddText: () => void;
+  onAddSimpleNode: () => void;
   currentLevel: C4Level;
   parentId?: string;
   isSupported: boolean;
@@ -26,6 +34,7 @@ export default function Toolbar({
   onSaveAs,
   onCreateElement,
   onAddText,
+  onAddSimpleNode,
   currentLevel,
   parentId,
   isSupported,
@@ -34,6 +43,7 @@ export default function Toolbar({
   isSavingFile,
 }: ToolbarProps) {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   async function handleCreateSubmit(data: CreateElementFormData) {
     await onCreateElement(data);
@@ -44,6 +54,8 @@ export default function Toolbar({
     'text-xs font-medium text-slate-700 px-2.5 py-1.5 bg-white rounded-md ring-1 ring-inset ring-slate-300 hover:bg-slate-50 disabled:opacity-40 transition-colors';
   const btnPrimary =
     'text-xs font-medium text-white px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md shadow-sm disabled:opacity-40 transition-colors';
+  const btnSheet =
+    'text-sm font-medium text-slate-700 w-full text-left px-3 py-2 rounded-md hover:bg-slate-100 disabled:opacity-40 transition-colors';
 
   return (
     <>
@@ -57,21 +69,62 @@ export default function Toolbar({
       )}
 
       <div className="flex items-center gap-2">
-        {/* File actions */}
-        <div className="flex items-center gap-1 rounded-md bg-slate-100 p-0.5">
-          <button type="button" onClick={onNew} disabled={!isSupported} className={btnSecondary}>
-            New
-          </button>
-          <button type="button" onClick={onOpen} disabled={!isSupported} className={btnPrimary}>
-            Open
-          </button>
-          <button type="button" onClick={onSave} disabled={!isSupported || isSavingFile} className={btnSecondary}>
-            Save
-          </button>
-          <button type="button" onClick={onSaveAs} disabled={!isSupported || isSavingFile} className={btnSecondary}>
-            Save As
-          </button>
-        </div>
+        {/* Sidebar toggle */}
+        <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+          <SheetTrigger
+            render={
+              <button
+                type="button"
+                className="flex items-center justify-center h-7 w-7 rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+                aria-label="Toggle sidebar"
+              />
+            }
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="4" x2="20" y1="12" y2="12" />
+              <line x1="4" x2="20" y1="6" y2="6" />
+              <line x1="4" x2="20" y1="18" y2="18" />
+            </svg>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-72 sm:max-w-xs p-0 bg-white">
+            <SheetHeader className="px-4 py-4 sm:px-4 border-b border-slate-200">
+              <SheetTitle className="text-sm font-semibold text-slate-900">
+                Sidebar
+              </SheetTitle>
+            </SheetHeader>
+            <div className="px-4 py-4 sm:px-4 flex flex-col gap-2">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">File</p>
+              <button type="button" onClick={() => { onNew(); setSheetOpen(false); }} disabled={!isSupported} className={btnSheet}>
+                New
+              </button>
+              <button type="button" onClick={() => { onOpen(); setSheetOpen(false); }} disabled={!isSupported} className={btnSheet}>
+                Open
+              </button>
+              <button type="button" onClick={() => { onSave(); setSheetOpen(false); }} disabled={!isSupported || isSavingFile} className={btnSheet}>
+                Save
+              </button>
+              <button type="button" onClick={() => { onSaveAs(); setSheetOpen(false); }} disabled={!isSupported || isSavingFile} className={btnSheet}>
+                Save As
+              </button>
+            </div>
+            <div className="px-4 py-4 sm:px-4 flex flex-col gap-2 border-t border-slate-200">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Nodes</p>
+              <button type="button" onClick={() => { onAddSimpleNode(); setSheetOpen(false); }} className={btnSheet}>
+                + Simple Node
+              </button>
+            </div>
+          </SheetContent>
+        </Sheet>
 
         <div className="w-px h-5 bg-slate-200" />
 

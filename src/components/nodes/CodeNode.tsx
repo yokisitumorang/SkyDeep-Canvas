@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { Handle, Position, NodeResizer } from 'reactflow';
 import type { NodeProps } from 'reactflow';
+import { Layers } from 'lucide-react';
 import type { C4NodeData } from '@/types/c4';
 import { getNodeColors, getNodeFontStyle } from './node-colors';
 
@@ -12,7 +13,7 @@ function CodeNode({ id, data, selected }: NodeProps<C4NodeData>) {
   return (
     <div
       style={getNodeFontStyle(data.font)}
-      className={`min-w-[200px] h-full rounded-lg ${c.bg} p-4 shadow-sm font-mono transition-shadow ${
+      className={`relative min-w-[200px] h-full rounded-lg ${c.bg} p-4 shadow-sm font-mono transition-shadow ${
         selected ? `ring-2 ${c.ringSelected} shadow-md` : `ring-1 ring-inset ${c.ring}`
       } ${data.hasChildren ? 'cursor-pointer' : 'opacity-60'}`}
       onDoubleClick={() => data.onEdit(id)}
@@ -20,8 +21,10 @@ function CodeNode({ id, data, selected }: NodeProps<C4NodeData>) {
       <NodeResizer isVisible={!!selected} minWidth={200} minHeight={80}
         lineClassName={c.resizerLine} handleClassName={c.resizerHandle} />
 
-      <Handle type="target" position={Position.Top} id="top" className={c.handle} />
-      <Handle type="target" position={Position.Left} id="left" className={c.handle} />
+      <Handle type="target" position={Position.Top} id="top-target" className={c.handle} />
+      <Handle type="source" position={Position.Top} id="top-source" className={c.handle} />
+      <Handle type="target" position={Position.Left} id="left-target" className={c.handle} />
+      <Handle type="source" position={Position.Left} id="left-source" className={c.handle} />
 
       <div className="flex items-start gap-2">
         <svg className={`mt-0.5 h-5 w-5 shrink-0 ${c.icon}`} viewBox="0 0 24 24" fill="none"
@@ -39,8 +42,24 @@ function CodeNode({ id, data, selected }: NodeProps<C4NodeData>) {
         </div>
       </div>
 
-      <Handle type="source" position={Position.Bottom} id="bottom" className={c.handle} />
-      <Handle type="source" position={Position.Right} id="right" className={c.handle} />
+      {data.hasChildren && (
+        <button
+          type="button"
+          aria-label="Open sub-canvas"
+          className="nodrag absolute -top-3 -left-3 p-0.5 rounded-full bg-white shadow ring-1 ring-slate-200 text-slate-400 opacity-80 hover:opacity-100 hover:text-indigo-600 transition-all cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onDrillDown(id);
+          }}
+        >
+          <Layers size={14} />
+        </button>
+      )}
+
+      <Handle type="target" position={Position.Bottom} id="bottom-target" className={c.handle} />
+      <Handle type="source" position={Position.Bottom} id="bottom-source" className={c.handle} />
+      <Handle type="target" position={Position.Right} id="right-target" className={c.handle} />
+      <Handle type="source" position={Position.Right} id="right-source" className={c.handle} />
     </div>
   );
 }
