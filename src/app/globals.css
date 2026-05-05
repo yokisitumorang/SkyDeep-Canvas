@@ -89,6 +89,15 @@ body {
   z-index: -1 !important;
 }
 
+/* Text nodes: transparent background, no default node chrome */
+.react-flow__node-text {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
 .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 2.5;
 }
@@ -98,12 +107,44 @@ body {
   height: 8px;
   border: 2px solid white;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Invisible larger hit area for easier grabbing */
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
 }
 
 .react-flow__node:hover .react-flow__handle,
 .react-flow__node.selected .react-flow__handle {
   opacity: 1;
+}
+
+/* When a connection is being dragged, show all handles as potential targets */
+.react-flow.connecting .react-flow__handle {
+  opacity: 1;
+  animation: handle-pulse 1.2s ease-in-out infinite;
+}
+
+/* Glow effect when a handle is valid for the current connection */
+.react-flow.connecting .react-flow__handle.connectingto,
+.react-flow.connecting .react-flow__handle.valid {
+  transform: scale(1.6);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3), 0 0 8px rgba(99, 102, 241, 0.2);
+  opacity: 1;
+  animation: none;
+}
+
+@keyframes handle-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
 /* Node resizer handle visibility */

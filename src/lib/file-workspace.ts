@@ -32,10 +32,17 @@ export interface WorkspaceFile {
   edgeStyles: Record<string, { type?: string; sourceHandle?: string; targetHandle?: string }>;
   /** Saved node colors keyed by node id */
   nodeColors: Record<string, string>;
-  /** Saved text node fonts keyed by node id */
-  textFonts: Record<string, string>;
-  /** Saved text node font sizes keyed by node id */
-  textFontSizes?: Record<string, number>;
+  /** Saved node font choices keyed by node id */
+  textFonts?: Record<string, 'default' | 'virgil'>;
+  /** Saved text node styles keyed by node id */
+  textStyles?: Record<string, {
+    fontSize?: number;
+    textColor?: string;
+    fontWeight?: 'normal' | 'bold';
+    fontStyle?: 'normal' | 'italic';
+    textAlign?: 'left' | 'center' | 'right' | 'justify';
+    fontFamily?: string;
+  }>;
   /** Saved node parent relationships keyed by node id */
   nodeParents: Record<string, { parentId: string; extent?: 'parent' }>;
   /** Directly saved edges for full-fidelity restore (handles, labels, multiple edges per pair) */
@@ -57,6 +64,8 @@ export interface WorkspaceFile {
   subCanvasStack?: SubCanvasEntry[];
   /** Per-sheet viewport state keyed by parent ID ("root" for root canvas) */
   sheetViewports?: Record<string, { x: number; y: number; zoom: number }>;
+  /** Custom sublayer labels keyed by node ID */
+  subLayerLabels?: Record<string, string>;
 }
 
 /**
@@ -71,7 +80,7 @@ export function createEmptyWorkspace(name: string): WorkspaceFile {
     edgeStyles: {},
     nodeColors: {},
     textFonts: {},
-    textFontSizes: {},
+    textStyles: {},
     nodeParents: {},
     edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
@@ -112,7 +121,7 @@ export function parseWorkspace(json: string): WorkspaceFile {
     edgeStyles: data.edgeStyles ?? {},
     nodeColors: data.nodeColors ?? {},
     textFonts: data.textFonts ?? {},
-    textFontSizes: data.textFontSizes ?? {},
+    textStyles: data.textStyles ?? {},
     nodeParents: data.nodeParents ?? {},
     edges: data.edges ?? [],
     viewport: data.viewport ?? { x: 0, y: 0, zoom: 1 },

@@ -11,9 +11,9 @@ const TYPE_TO_LEVEL: Record<C4Type, C4Level> = {
   container: 'L2',
   component: 'L3',
   code: 'L4',
-  text: 'L1',
   group: 'L1',
   simple: 'L1',
+  text: 'L1',
 };
 
 /** Required fields in architecture file frontmatter */

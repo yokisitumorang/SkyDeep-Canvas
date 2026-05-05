@@ -4,7 +4,6 @@ import ContainerNode from './ContainerNode';
 import ComponentNode from './ComponentNode';
 import CodeNode from './CodeNode';
 import BoundaryGroupNode from './BoundaryGroupNode';
-import TextNode from './TextNode';
 import LabeledGroupNode from './LabeledGroupNode';
 
 /**
@@ -18,7 +17,6 @@ export const nodeTypes: NodeTypes = {
   component: ComponentNode,
   code: CodeNode,
   boundary: BoundaryGroupNode,
-  text: TextNode,
   group: LabeledGroupNode,
 };
 

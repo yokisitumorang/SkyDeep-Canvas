@@ -1,7 +1,6 @@
 'use client';
 
 import { Layers } from 'lucide-react';
-import type { TextFont } from './TextContextMenu';
 
 const SUB_LEVEL_TYPES = new Set(['system', 'container', 'component', 'code', 'simple']);
 
@@ -11,9 +10,7 @@ interface NodeContextMenuProps {
   nodeId: string;
   nodeType?: string;
   currentColor?: string;
-  currentFont?: TextFont;
   onChangeColor: (nodeId: string, color: string | undefined) => void;
-  onChangeFont: (nodeId: string, font: TextFont) => void;
   onUngroup?: (nodeId: string) => void;
   onCreateSubLevel?: (nodeId: string) => void;
   onClose: () => void;
@@ -30,20 +27,13 @@ const COLOR_OPTIONS = [
   { value: 'slate', label: 'Gray', bg: 'bg-slate-400' },
 ];
 
-const FONT_OPTIONS: { value: TextFont; label: string }[] = [
-  { value: 'default', label: 'Default' },
-  { value: 'virgil', label: 'Sketch style' },
-];
-
 export default function NodeContextMenu({
   x,
   y,
   nodeId,
   nodeType,
   currentColor,
-  currentFont,
   onChangeColor,
-  onChangeFont,
   onUngroup,
   onCreateSubLevel,
   onClose,
@@ -83,40 +73,6 @@ export default function NodeContextMenu({
           >
             Reset color
           </button>
-        )}
-
-        {!isGroup && (
-          <>
-            <div className="my-1 border-t border-slate-100" />
-
-            <p className="px-3 py-1.5 text-xs font-medium text-slate-400 uppercase tracking-wider">
-              Font
-            </p>
-            {FONT_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => { onChangeFont(nodeId, opt.value); onClose(); }}
-                className={`w-full flex items-center gap-3 px-3 py-2 text-xs text-left hover:bg-slate-50 transition-colors ${
-                  (currentFont ?? 'virgil') === opt.value ? 'text-indigo-600 font-medium' : 'text-slate-700'
-                }`}
-              >
-                <span
-                  className="text-sm w-5 text-center shrink-0"
-                  style={{ fontFamily: opt.value === 'virgil' ? 'Virgil, sans-serif' : 'inherit' }}
-                >
-                  Aa
-                </span>
-                {opt.label}
-                {(currentFont ?? 'virgil') === opt.value && (
-                  <svg className="ml-auto h-3 w-3 text-indigo-600 shrink-0" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                )}
-              </button>
-            ))}
-          </>
         )}
 
         {isGroup && (

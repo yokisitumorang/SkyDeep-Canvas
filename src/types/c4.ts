@@ -9,7 +9,7 @@
  */
 
 /** The four C4 element types plus canvas-only annotation types */
-export type C4Type = 'system' | 'container' | 'component' | 'code' | 'text' | 'group' | 'simple';
+export type C4Type = 'system' | 'container' | 'component' | 'code' | 'group' | 'simple' | 'text';
 
 /** The four C4 hierarchy levels */
 export type C4Level = 'L1' | 'L2' | 'L3' | 'L4';

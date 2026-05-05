@@ -83,6 +83,24 @@ export interface DiagramState {
 
   /** Per-sheet saved visual state (nodes and edges) — runtime only, not persisted */
   sheetNodeData: Record<string, { nodes: ReactFlowNode[]; edges: ReactFlowEdge[] }>;
+
+  /** Persisted map of nodeId → custom sublayer label */
+  subLayerLabels: Record<string, string>;
+
+  /** Workspace-level saved positions — used as fallback when rendering a sheet for the first time */
+  savedPositions: Record<string, { x: number; y: number; width?: number; height?: number }>;
+  /** Workspace-level saved edges — used as fallback when rendering a sheet for the first time */
+  savedEdges: Array<{ id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; type?: string; label?: string; markerEnd?: unknown; markerStart?: unknown }>;
+  /** Workspace-level saved node colors */
+  savedNodeColors: Record<string, string>;
+  /** Workspace-level saved text fonts */
+  savedTextFonts: Record<string, 'default' | 'virgil'>;
+  /** Workspace-level saved text styles */
+  savedTextStyles: Record<string, Record<string, unknown>>;
+  /** Workspace-level saved node parents */
+  savedNodeParents: Record<string, { parentId: string; extent?: 'parent' }>;
+  /** Workspace-level saved edge styles */
+  savedEdgeStyles: Record<string, { type?: string; sourceHandle?: string; targetHandle?: string }>;
 }
 
 export interface DiagramActions {
@@ -95,7 +113,7 @@ export interface DiagramActions {
   navigateToBreadcrumb(index: number): void;
 
   // Sub-canvas navigation actions
-  navigateToSubCanvas(nodeId: string): void;
+  navigateToSubCanvas(nodeId: string, customLabel?: string): void;
   navigateToSheet(index: number): void;
   navigateToRoot(): void;
 
@@ -126,6 +144,14 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
   subCanvasStack: [],
   sheetViewports: {},
   sheetNodeData: {},
+  subLayerLabels: {},
+  savedPositions: {},
+  savedEdges: [],
+  savedNodeColors: {},
+  savedTextFonts: {},
+  savedTextStyles: {},
+  savedNodeParents: {},
+  savedEdgeStyles: {},
 
   // Workspace actions
   setFileHandle(handle: FileSystemFileHandle, name: string) {
@@ -187,11 +213,17 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
   },
 
   // Sub-canvas navigation actions
-  navigateToSubCanvas(nodeId: string) {
-    const { allElements, subCanvasStack, sheetViewports, viewport, nodes, edges, sheetNodeData } = get();
+  navigateToSubCanvas(nodeId: string, customLabel?: string) {
+    const { allElements, subCanvasStack, sheetViewports, viewport, nodes, edges, sheetNodeData, subLayerLabels } = get();
 
     const element = allElements.find((el) => el.id === nodeId);
     if (!element) return;
+
+    // Persist the sublayer label (custom label takes priority, then existing label, then element name)
+    const label = customLabel ?? subLayerLabels[nodeId] ?? element.name;
+    const updatedSubLayerLabels = customLabel
+      ? { ...subLayerLabels, [nodeId]: customLabel }
+      : subLayerLabels;
 
     // Determine the active sheet key for saving the current viewport and node data
     const activeSheetKey =
@@ -214,7 +246,7 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
     // Push a new SubCanvasEntry onto the stack
     const newEntry: SubCanvasEntry = {
       parentId: nodeId,
-      label: element.name,
+      label,
     };
     const updatedStack = [...subCanvasStack, newEntry];
 
@@ -232,6 +264,7 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
       subCanvasStack: updatedStack,
       sheetViewports: updatedSheetViewports,
       sheetNodeData: updatedSheetNodeData,
+      subLayerLabels: updatedSubLayerLabels,
       viewport: targetViewport,
       nodes: targetNodeData?.nodes ?? [],
       edges: targetNodeData?.edges ?? [],
@@ -341,3 +374,4 @@ export const useAllElements = () => useDiagramStore((s) => s.allElements);
 export const useParseErrors = () => useDiagramStore((s) => s.parseErrors);
 export const useSubCanvasStack = () => useDiagramStore((s) => s.subCanvasStack);
 export const useSheetViewports = () => useDiagramStore((s) => s.sheetViewports);
+export const useSubLayerLabels = () => useDiagramStore((s) => s.subLayerLabels);
